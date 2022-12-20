@@ -16,6 +16,28 @@
 #include "structs.h"
 #include "tm.h"
 
+/*
+ * About grader scenario we have around
+ * Event:               Number of occurences:
+ * tm_read              70,000,000
+ * tm_write             1,400,000
+ * tm_begin             1,400,000
+ * tm_end               1,400,000
+ * tm_alloc             300
+ * tm_free              300
+ * 
+ * Typically there are around 7 segments
+ *
+ * We have to types of transactions (50/50)
+ * - big read onlys, reading about 1000 fields
+ * - small rw, reading less then 40 writing up to 3 (usually 2)
+ * (4 outliners with reading 0 and writing 129)
+ * All sizes in read or write are 8
+ * 
+ * Alocation is always 1048 bytes
+ */
+
+
 /* Constnts */
 
 const char* const_buffer = "aaaabbbbccccddddeeeeffffgggghhhhiiiijjjjkkkkllllmmmmnnnnoooopppp";

@@ -20,14 +20,14 @@ shared_t tm_create(size_t size, size_t align) {
         free(region);
         return invalid_shared;
     }
-    region->txs = 0; region->txs_ro = 0; region->tx_a_r = 0; region->tx_a_rsv = 0; region->tx_a_la = 0; region->tx_a_ro = 0; region->tx_s = 0; // TODO remove
+    // region->txs = 0; region->txs_ro = 0; region->tx_a_r = 0; region->tx_a_rsv = 0; region->tx_a_la = 0; region->tx_a_ro = 0; region->tx_s = 0; // TODO remove
     return (shared_t)region;    
 }
 
 void tm_destroy(shared_t shared) {
     region_t* region = (region_t*) shared;
-    printf("[tm_destroy] txs: %u, txs_ro: %u, txs_s: %u, tx_a_r: %u, tx_a_ro: %u, tx_a_rsv: %u, tx_a_la: %u\n", 
-        region->txs, region->txs_ro, region->tx_s, region->tx_a_r, region->tx_a_ro, region->tx_a_rsv, region->tx_a_la);
+    // printf("[tm_destroy] txs: %u, txs_ro: %u, txs_s: %u, tx_a_r: %u, tx_a_ro: %u, tx_a_rsv: %u, tx_a_la: %u\n", 
+    //     region->txs, region->txs_ro, region->tx_s, region->tx_a_r, region->tx_a_ro, region->tx_a_rsv, region->tx_a_la);
     region_destroy(region);
 }
 
@@ -53,17 +53,13 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
         free(tx);
         return invalid_tx;
     }
-    atomic_fetch_add(&(tx->region->txs), 1); // TODO remove
-    if (is_ro)
-        atomic_fetch_add(&(tx->region->txs_ro), 1);
-
+    
     return (tx_t)tx;
 }
 
 bool tm_end(shared_t unused(shared), tx_t tx) {
     if (((transaction_t*)tx)->is_ro) { 
         /* No read_set validation is needed, commit */
-        atomic_fetch_add(&(((transaction_t*)tx)->region->tx_s), 1); // TODO remove
         transaction_destroy((transaction_t*)tx);
         return true;
     }
@@ -72,7 +68,6 @@ bool tm_end(shared_t unused(shared), tx_t tx) {
         transaction_destroy((transaction_t*)tx);
         return false;
     }
-    atomic_fetch_add(&(((transaction_t*)tx)->region->tx_s), 1); // TODO remove
     transaction_destroy((transaction_t*)tx);
     return true;
 }

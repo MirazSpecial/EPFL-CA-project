@@ -55,7 +55,7 @@ struct segment_node {
 typedef struct segment_node segment_node_t;
 
 struct region {
-    atomic_uint txs, txs_ro, tx_s, tx_a_r, tx_a_ro, tx_a_rsv, tx_a_la;
+    // atomic_uint txs, txs_ro, tx_s, tx_a_r, tx_a_ro, tx_a_rsv, tx_a_la;
     atomic_uint global_clock;
     segment_descriptor_t* desc;
     segment_node_t* allocs;
@@ -63,7 +63,9 @@ struct region {
 };
 typedef struct region region_t;
 
-/* Ill treat tx_t as locations in memory */
+/*
+ * I decided to tread tx_t as a location in memory
+ */
 struct transaction {
     // unsigned id; //TODO remove
     region_t* region;

@@ -20,8 +20,6 @@ bool tl2_load(transaction_t* tx, segment_descriptor_t* segment, const void* sour
         if (segment->locks[field] == LOCKED || 
             segment->w_counters[field] > w_count || 
             segment->w_counters[field] > tx->rv) {
-            atomic_fetch_add(&(tx->region->tx_a_r), 1); // TODO remove
-            // printf("tx_a_r\n");
             return false; /* Read value from older snapshot, abort */
         }
     }
@@ -37,8 +35,6 @@ bool tl2_load_ro(transaction_t* tx, segment_descriptor_t* segment, const void* s
 
     if (segment->locks[field] == LOCKED || 
         segment->w_counters[field] > tx->rv) {
-        atomic_fetch_add(&(tx->region->tx_a_ro), 1); // TODO remove
-        // printf("tx_a_ro\n");
         return false; /* Read value from older snapshot, abort */
     }
     return true;
@@ -91,8 +87,6 @@ bool tl2_end(transaction_t* tx) {
         if (!atomic_compare_exchange_strong(&(segment->locks[field]), &desired_lock_state, LOCKED)) {
             /* Lock is locked, abort */
             free_locks(write_set_targets_copy, region, i);
-            atomic_fetch_add(&(tx->region->tx_a_la), 1); // TODO remove
-            // printf("tx_a_la\n")
             return false;
         }
     }
@@ -112,31 +106,9 @@ bool tl2_end(transaction_t* tx) {
             segment->w_counters[field] > tx->rv) {
             /* Read value no longer valid, abort */
             free_locks(tx->write_set_targets, region, tx->write_set_targets->size);
-            atomic_fetch_add(&(tx->region->tx_a_rsv), 1); // TODO remove
-            // printf("tx_a_rsv\n")
             return false;
         }
     }
-
-    // add to history TODO remove
-    // write_entry_t we;
-    // we.tx_id = tx->id;
-    // we.thread = pthread_self();
-    // we.rv = tx->rv;
-    // we.wv = wv;
-    // if (tx->write_set_targets->size == 2) {
-    //     we.num1 = find_field(region->desc, tx->write_set_targets->data[0]);
-    //     we.num2 = find_field(region->desc, tx->write_set_targets->data[1]);
-    //     we.val1 = *((long long*)(tx->write_set_values->data[0]));
-    //     we.val2 = *((long long*)(tx->write_set_values->data[1]));
-    // }
-    // else {
-    //     we.num1 = -1111;
-    //     we.num2 = -1111;
-    //     we.val1 = -1111;
-    //     we.val2 = -1111;
-    // }
-    // history[wv] = we; // TODO remove
 
     /* Write new values and increase w_count */
     for (size_t i = 0; i < tx->write_set_targets->size; ++i) {
