@@ -1,13 +1,5 @@
 #pragma once
 
-// // Requested feature: pthread_rwlock_t
-// #ifndef _GNU_SOURCE
-// #define _GNU_SOURCE
-// #endif
-// #ifndef __USE_XOPEN2K
-// #define __USE_XOPEN2K
-// #endif
-
 #include <stdatomic.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -24,18 +16,6 @@
 #define FREE 0
 #define LOCKED 1
 
-// atomic_uint tx_count; // TODO remove
-// atomic_uint tx_aborted;
-// struct write_entry { // TODO remove
-//     unsigned tx_id;
-//     unsigned rv, wv;
-//     long unsigned thread;
-//     size_t num1, num2;
-//     long long val1, val2;
-// };
-// typedef struct write_entry write_entry_t;
-// write_entry_t history[(size_t)1e6]; // TODO remove
-
 
 struct segment_descriptor {
     size_t size;                /* Size in bytes */
@@ -49,16 +29,15 @@ typedef struct segment_descriptor segment_descriptor_t;
 
 struct segment_node {
     segment_descriptor_t* desc;
-    struct segment_node* prev;
     struct segment_node* next;
 };
 typedef struct segment_node segment_node_t;
 
 struct region {
-    // atomic_uint txs, txs_ro, tx_s, tx_a_r, tx_a_ro, tx_a_rsv, tx_a_la;
     atomic_uint global_clock;
     segment_descriptor_t* desc;
     segment_node_t* allocs;
+    pthread_mutex_t allocs_lock;
     size_t align;               
 };
 typedef struct region region_t;
@@ -67,13 +46,12 @@ typedef struct region region_t;
  * I decided to tread tx_t as a location in memory
  */
 struct transaction {
-    // unsigned id; //TODO remove
     region_t* region;
     bool is_ro;
-    uint32_t rv;                /* Read version of global clock */
-    cvector_t* read_set;          /* Set of locations read by tx in tm */
-    vector_t* write_set_targets; /* Set of locations writen to by tx in tm */
-    vector_t* write_set_values; /* Set of locations of values written */
+    uint32_t rv;                    /* Read version of global clock */
+    cvector_t* read_set;            /* Set of locations read by tx in tm */
+    vector_t* write_set_targets;    /* Set of locations writen to by tx in tm */
+    vector_t* write_set_values;     /* Set of locations of values written */
 };
 typedef struct transaction transaction_t;
 
@@ -87,3 +65,4 @@ int transaction_init(transaction_t* tx, region_t* region, bool is_ro);
 void transaction_destroy(transaction_t* tx);
 
 segment_descriptor_t* segment_find(const region_t* region, const void* address);
+segment_descriptor_t* add_segment(region_t* region, size_t size);

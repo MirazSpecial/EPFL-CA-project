@@ -15,6 +15,7 @@ int region_init(region_t* region, size_t size, size_t align) {
     region->allocs = NULL;
     region->align = align;
     region->global_clock = 0;
+    pthread_mutex_init(&(region->allocs_lock), NULL);
     if (segment_init(region, region->desc, size) != INIT_SUCCESS) {
         free(region->desc);
         return INIT_FAIL;
@@ -29,11 +30,19 @@ void region_destroy(region_t* region) {
     while (region->allocs) {
         segment_node_t* next = region->allocs->next;
 
-        segment_destroy(region->allocs->desc);
+        if (region->allocs->desc) {
+            /* 
+             * This if is needed, because segment could have alreade been freed
+             * by tm_free. In that case, segment_node would still be part of the
+             * linked list, but its 'desc' would be null. This allows us not to
+             * care about deleting elements from linked list concurrently
+             */
+            segment_destroy(region->allocs->desc);
+        }
         free(region->allocs);
-
         region->allocs = next;
     }
+    pthread_mutex_destroy(&(region->allocs_lock));
     segment_destroy(region->desc);
     free(region);
 }
@@ -125,3 +134,32 @@ segment_descriptor_t* segment_find(const region_t* region, const void* address) 
     return NULL;
 }
 
+segment_descriptor_t* add_segment(region_t* region, size_t size) {
+    segment_descriptor_t* segment_ptr = (segment_descriptor_t*)malloc(sizeof(segment_descriptor_t));
+    segment_node_t* node_ptr = (segment_node_t*)malloc(sizeof(segment_node_t));
+    if (!segment_ptr || !node_ptr) {
+        free(segment_ptr);
+        return NULL;
+    }
+    if (segment_init(region, segment_ptr, size) != INIT_SUCCESS) {
+        free(segment_ptr);
+        free(node_ptr);
+        return NULL;
+    }
+    node_ptr->desc = segment_ptr;
+
+    pthread_mutex_lock(&(region->allocs_lock));
+    if (!region->allocs) {
+        /* First allocated segment */
+        region->allocs = node_ptr;
+        node_ptr->next = NULL;
+    }
+    else {
+        /* Put at the beginning of allocated linked list */
+        node_ptr->next = region->allocs;
+        region->allocs = node_ptr;
+    }
+    pthread_mutex_unlock(&(region->allocs_lock));
+
+    return segment_ptr;
+}
