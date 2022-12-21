@@ -17,6 +17,20 @@
 #include "tm.h"
 
 /*
+
+    1. Lets assume there is one lock that needs to be aquired doing tm_free tm_alloc
+    2. Lets assume that transaction does at most one tm_free 
+
+    With those two assumptions, we could segment_destroy() segments previously marked as to_delete,
+    in given tm_free and at the end mark his own as to_delete. We can do that, because we know,
+    that if given tm_free is running, then all transactions of previous tm_frees already ended.
+
+    UPDATE
+    Not really, transaction can do tm_free and then many different things
+
+*/
+
+/*
  * About grader scenario we have around
  * Event:               Number of occurences:
  * tm_read              70,000,000

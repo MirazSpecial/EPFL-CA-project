@@ -7,14 +7,18 @@
 #include "structs.h"
 #include "vector.h"
 
+const uint32_t garbage_collector_lag = 20;
+
 int region_init(region_t* region, size_t size, size_t align) {
     region->desc = (segment_descriptor_t*)malloc(sizeof(segment_descriptor_t));
     if (!region->desc) {
         return INIT_FAIL;
     }
     region->allocs = NULL;
+    region->allocs_zombie = NULL;
     region->align = align;
     region->global_clock = 0;
+    region->scheduled_to_delete = 0;
     pthread_mutex_init(&(region->allocs_lock), NULL);
     if (segment_init(region, region->desc, size) != INIT_SUCCESS) {
         free(region->desc);
@@ -29,18 +33,15 @@ void region_destroy(region_t* region) {
 
     while (region->allocs) {
         segment_node_t* next = region->allocs->next;
-
-        if (region->allocs->desc) {
-            /* 
-             * This if is needed, because segment could have alreade been freed
-             * by tm_free. In that case, segment_node would still be part of the
-             * linked list, but its 'desc' would be null. This allows us not to
-             * care about deleting elements from linked list concurrently
-             */
-            segment_destroy(region->allocs->desc);
-        }
+        segment_destroy(region->allocs->desc);
         free(region->allocs);
         region->allocs = next;
+    }
+    while (region->allocs_zombie) {
+        segment_node_t* next = region->allocs_zombie->next;
+        segment_destroy(region->allocs_zombie->desc);
+        free(region->allocs_zombie);
+        region->allocs_zombie = next;
     }
     pthread_mutex_destroy(&(region->allocs_lock));
     segment_destroy(region->desc);
@@ -119,6 +120,19 @@ bool address_in_segment(const segment_descriptor_t* segment, const void* address
     return segment->data <= address && address < segment->data + segment->size;
 }
 
+segment_node_t* node_find(const region_t* region, const void* address) {
+    segment_node_t* allocs = region->allocs;
+    while (allocs) {
+        if (address_in_segment(allocs->desc, address)) {
+            return allocs;
+        }
+        allocs = allocs->next;
+    }
+    printf("NODE_FIND WRONG ADDRESS\n"); exit(1); // TODO remove
+    /* This address is not in tm region */
+    return NULL;
+}
+
 segment_descriptor_t* segment_find(const region_t* region, const void* address) {
     if (address_in_segment(region->desc, address)) {
         return region->desc;
@@ -131,28 +145,67 @@ segment_descriptor_t* segment_find(const region_t* region, const void* address) 
         allocs = allocs->next;
     }
     /* This address is not in tm region */
+    printf("SEGMENT_FIND WRONG ADDRESS: %p\n", address); exit(1); // TODO remove
     return NULL;
+}
+
+/*
+ * Removes segments scheduled to remove some time ago.
+ *
+ * Assumes that caller locked the allocs_lock
+ */
+void clean_old_segments(region_t* region) {
+    segment_node_t* prev = NULL;
+    segment_node_t* curr = region->allocs;
+    while(curr) {
+        if (curr->to_delete && curr->to_delete_from + garbage_collector_lag < region->scheduled_to_delete) {
+            /* Node can be removed from allocs */
+            if (!prev)
+                region->allocs = curr->next;
+            else
+                prev->next = curr->next;
+
+            /* Add node to allocs zombie */
+            // curr->next = region->allocs_zombie;
+            // region->allocs_zombie = curr;
+
+            /* Move to next curr */
+            curr = prev->next;
+        }
+        else {
+            prev = curr;
+            curr = curr->next;
+        }
+    }
+}
+
+/*
+ * Schedules segment (node) to be deleted.
+ *
+ * Assumes that caller locked the alloc_lock
+ */
+void schedule_to_delete(region_t* region, segment_node_t* node) {
+    node->to_delete = true;
+    node->to_delete_from = region->scheduled_to_delete;
+    region->scheduled_to_delete++;
 }
 
 segment_descriptor_t* add_segment(region_t* region, size_t size) {
     segment_descriptor_t* segment_ptr = (segment_descriptor_t*)malloc(sizeof(segment_descriptor_t));
     segment_node_t* node_ptr = (segment_node_t*)malloc(sizeof(segment_node_t));
-    if (!segment_ptr || !node_ptr) {
-        free(segment_ptr);
-        return NULL;
-    }
-    if (segment_init(region, segment_ptr, size) != INIT_SUCCESS) {
+    if (!segment_ptr || !node_ptr || segment_init(region, segment_ptr, size) != INIT_SUCCESS) {
         free(segment_ptr);
         free(node_ptr);
         return NULL;
     }
+    node_ptr->to_delete = false;
     node_ptr->desc = segment_ptr;
 
     pthread_mutex_lock(&(region->allocs_lock));
     if (!region->allocs) {
         /* First allocated segment */
-        region->allocs = node_ptr;
         node_ptr->next = NULL;
+        region->allocs = node_ptr;
     }
     else {
         /* Put at the beginning of allocated linked list */

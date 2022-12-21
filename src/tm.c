@@ -131,9 +131,13 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** unused(ta
 
 bool tm_free(shared_t shared, tx_t unused(tx), void* segment) {
     region_t* region = (region_t*) shared;
-    segment_descriptor_t* unused(segment_ptr) = segment_find(region, segment);
 
-    // TODO - free for real
+    pthread_mutex_lock(&(region->allocs_lock));
+
+    schedule_to_delete(region, node_find(region, segment)); /* Schedules segment to be deleted */
+    clean_old_segments(region); /* Deletes segments scheduled in the past */
+
+    pthread_mutex_unlock(&(region->allocs_lock));
 
     return true;
 }
