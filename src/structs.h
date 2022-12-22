@@ -11,8 +11,6 @@
 #define INIT_SUCCESS 0
 #define INIT_FAIL 1
 
-#define find_field(segment, data_ptr) (((data_ptr) - (segment)->data) / (segment)->align) 
-
 #define FREE 0
 #define LOCKED 1
 
@@ -24,24 +22,16 @@ struct segment_descriptor {
     void* data;                 /* Pointer to tm */
     atomic_bool* locks;         /* Locks for segment's fiels */
     uint32_t* w_counters;       /* Local counters of tm fields */
+    bool to_delete;             /* If segment was scheduled for deletion */
 };
 typedef struct segment_descriptor segment_descriptor_t;
-
-struct segment_node {
-    segment_descriptor_t* desc;
-    struct segment_node* next;
-    bool to_delete;             /* If segment was freed in some transaction */
-    uint32_t to_delete_from;    /* Number of tm_free execution which set to_delete flag*/
-};
-typedef struct segment_node segment_node_t;
 
 struct region {
     atomic_uint global_clock;
     segment_descriptor_t* desc;
-    segment_node_t* allocs;
-    segment_node_t* allocs_zombie;
+    vector_t* allocs;
     pthread_mutex_t allocs_lock;
-    uint32_t scheduled_to_delete;
+    uint32_t allocs_frees;
     size_t align;               
 };
 typedef struct region region_t;
@@ -68,10 +58,6 @@ void segment_destroy(segment_descriptor_t* desc);
 int transaction_init(transaction_t* tx, region_t* region, bool is_ro);
 void transaction_destroy(transaction_t* tx);
 
-segment_descriptor_t* segment_find(const region_t* region, const void* address);
-segment_node_t* node_find(const region_t* region, const void* address);
-
-segment_descriptor_t* add_segment(region_t* region, size_t size);
-
-void clean_old_segments(region_t* region);
-void schedule_to_delete(region_t* region, segment_node_t* node);
+uint32_t add_segment(region_t* region, size_t size);
+void schedule_to_delete(region_t* region, segment_descriptor_t* desc);
+void delete_old_segments(region_t* region);

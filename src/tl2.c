@@ -2,11 +2,12 @@
 #include <stdio.h>
 
 #include "tl2.h"
+#include "addressing.h"
 
 
 bool tl2_load(transaction_t* tx, segment_descriptor_t* segment, const void* source, void* buffer) {
     size_t align = segment->align;
-    size_t field = find_field(segment, source);
+    size_t field = find_field_number(segment, source);
     size_t set_index = vector_find_last(tx->write_set_targets, source);
     
     if (set_index != (size_t)-1) {
@@ -16,7 +17,8 @@ bool tl2_load(transaction_t* tx, segment_descriptor_t* segment, const void* sour
     else {
         /* This transaction has not written in this field */
         uint32_t w_count = segment->w_counters[field];
-        memcpy(buffer, source, align);
+        void* physical_address = get_physical_address(segment, source);
+        memcpy(buffer, physical_address, align);
         if (segment->locks[field] == LOCKED || 
             segment->w_counters[field] > w_count || 
             segment->w_counters[field] > tx->rv) {
@@ -30,8 +32,9 @@ bool tl2_load(transaction_t* tx, segment_descriptor_t* segment, const void* sour
 }
 
 bool tl2_load_ro(transaction_t* tx, segment_descriptor_t* segment, const void* source, void* buffer) {
-    size_t field = find_field(segment, source);
-    memcpy(buffer, source, segment->align);
+    size_t field = find_field_number(segment, source);
+    void* physical_address = get_physical_address(segment, source);
+    memcpy(buffer, physical_address, segment->align);
 
     if (segment->locks[field] == LOCKED || 
         segment->w_counters[field] > tx->rv) {
@@ -39,7 +42,6 @@ bool tl2_load_ro(transaction_t* tx, segment_descriptor_t* segment, const void* s
     }
     return true;
 }
-
 
 bool tl2_put(transaction_t* tx, segment_descriptor_t* segment, const void* source, void* const target) {
     size_t align = segment->align;
@@ -59,8 +61,8 @@ bool tl2_put(transaction_t* tx, segment_descriptor_t* segment, const void* sourc
 void free_locks(vector_t* locations, region_t* region, size_t n) {
     bool desired_lock_state;
     for (size_t i = 0; i < n; ++i) {
-        segment_descriptor_t* segment = segment_find(region, locations->data[i]); 
-        size_t field = find_field(segment, locations->data[i]);
+        segment_descriptor_t* segment = find_segment(region, locations->data[i]); 
+        size_t field = find_field_number(segment, locations->data[i]);
         desired_lock_state = LOCKED;
         if (!atomic_compare_exchange_strong(&(segment->locks[field]), &desired_lock_state, FREE)) {
             /* This lock was supposed to be locked, but its free, which is weird
@@ -81,8 +83,8 @@ bool tl2_end(transaction_t* tx) {
     /* Acquire locks in any order */        // TODO maybe more then one loop?
     bool desired_lock_state;
     for (size_t i = 0; i < write_set_targets_copy->size; ++i) {
-        segment_descriptor_t* segment = segment_find(region, write_set_targets_copy->data[i]); 
-        size_t field = find_field(segment, write_set_targets_copy->data[i]);
+        segment_descriptor_t* segment = find_segment(region, write_set_targets_copy->data[i]); 
+        size_t field = find_field_number(segment, write_set_targets_copy->data[i]);
         desired_lock_state = FREE;
         if (!atomic_compare_exchange_strong(&(segment->locks[field]), &desired_lock_state, LOCKED)) {
             /* Lock is locked, abort */
@@ -97,8 +99,8 @@ bool tl2_end(transaction_t* tx) {
     
     /* Validate the read set */
     for (size_t i = 0; i < tx->read_set->size; ++i) {
-        segment_descriptor_t* segment = segment_find(tx->region, tx->read_set->data[i]); 
-        size_t field = find_field(segment, tx->read_set->data[i]);
+        segment_descriptor_t* segment = find_segment(tx->region, tx->read_set->data[i]); 
+        size_t field = find_field_number(segment, tx->read_set->data[i]);
         bool field_written = vector_find_last(
             tx->write_set_targets, tx->read_set->data[i]) != (size_t)-1;
 
@@ -112,10 +114,11 @@ bool tl2_end(transaction_t* tx) {
 
     /* Write new values and increase w_count */
     for (size_t i = 0; i < tx->write_set_targets->size; ++i) {
-        segment_descriptor_t* segment = segment_find(tx->region, tx->write_set_targets->data[i]); 
-        size_t field = find_field(segment, tx->write_set_targets->data[i]);
+        segment_descriptor_t* segment = find_segment(tx->region, tx->write_set_targets->data[i]); 
+        size_t field = find_field_number(segment, tx->write_set_targets->data[i]);
 
-        memcpy(tx->write_set_targets->data[i], tx->write_set_values->data[i], region->align);
+        void* physical_address = get_physical_address(segment, tx->write_set_targets->data[i]);
+        memcpy(physical_address, tx->write_set_values->data[i], region->align);
         segment->w_counters[field] = wv; /* Increasing w_count */
     }
 
